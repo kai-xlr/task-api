@@ -1,7 +1,8 @@
 use axum::{
     Json, Router,
-    extract::State,
-    routing::{get, post},
+    extract::{Path, State},
+    http::StatusCode,
+    routing::get,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
@@ -19,6 +20,11 @@ struct AppState {
     database: Arc<RwLock<Vec<Task>>>,
 }
 
+#[derive(Deserialize)]
+struct CreateTask {
+    title: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState {
@@ -28,6 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/", get(root))
         .route("/tasks", get(get_tasks).post(create_task))
+        .route("/tasks/:id", get(get_task))
         .with_state(state); // no extra Arc needed
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -50,13 +57,26 @@ async fn get_tasks(State(state): State<AppState>) -> Json<Vec<Task>> {
     Json(db.clone())
 }
 
+/// GET /tasks/:id
+async fn get_task(
+    Path(id): Path<i32>,
+    State(state): State<AppState>,
+) -> Result<Json<Task>, (StatusCode, &'static str)> {
+    let db = state.database.read().await;
+    if let Some(task) = db.iter().find(|t| t.id == id).cloned() {
+        Ok(Json(task))
+    } else {
+        Err((StatusCode::NOT_FOUND, "Task not found"))
+    }
+}
+
 /// POST /tasks
-async fn create_task(State(state): State<AppState>) -> Json<Task> {
+async fn create_task(State(state): State<AppState>, Json(payload): Json<CreateTask>) -> Json<Task> {
     let mut db = state.database.write().await;
 
     let new_task = Task {
         id: db.len() as i32 + 1, // simple ID generation
-        title: format!("Task {}", db.len() + 1),
+        title: payload.title,
         completed: false,
     };
 
